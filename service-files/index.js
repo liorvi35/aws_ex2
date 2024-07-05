@@ -45,7 +45,6 @@ app.get('/', (req, res) => {
  * @param {Object} req - The request object
  * @param {Object} res - The response object
  */
-
 app.post('/restaurants', async (req, res) => {
     const restaurant = req.body;
 
@@ -62,19 +61,32 @@ app.post('/restaurants', async (req, res) => {
         }
     };
 
-    try {
-        // Check if the restaurant already exists in the database
-        const data = await dynamodb.get(getParams).promise();
+    if (USE_CACHE) {
+        try {
+            // Check the cache for existing restaurant
+            const cachedRestaurant = await memcachedActions.getRestaurants(restaurant.name);
+            if (cachedRestaurant) {
+                res.status(409).send({ success: false, message: 'Restaurant already exists' });
+                return;
+            }
+        } catch (cacheError) {
+            console.error('Error accessing memcached:', cacheError);
+        }
+    } else {
+        try {
+            // Check the database for existing restaurant
+            const data = await dynamodb.get(getParams).promise();
 
-        if (data.Item) {
-            res.status(409).send({ success: false, message: 'Restaurant already exists' });
+            if (data.Item) {
+                res.status(409).send({ success: false, message: 'Restaurant already exists' });
+                return;
+            }
+
+        } catch (err) {
+            console.error('POST /restaurants', err);
+            res.status(500).send("Internal Server Error");
             return;
         }
-
-    } catch (err) {
-        console.error('POST /restaurants', err);
-        res.status(500).send("Internal Server Error");
-        return;
     }
 
     const params = {
@@ -91,6 +103,43 @@ app.post('/restaurants', async (req, res) => {
     try {
         // Add the new restaurant to the database
         await dynamodb.put(params).promise();
+
+        if (USE_CACHE) {
+            const cacheKeysToInvalidate = [];
+
+            // Generate cache keys to invalidate
+            for (let limit = 10; limit <= 100; limit += 1) {
+                cacheKeysToInvalidate.push(`${restaurant.region}_limit_${limit}`);
+                cacheKeysToInvalidate.push(`${restaurant.region}_${restaurant.cuisine}_limit_${limit}`);
+
+                for (let minRating = 0; minRating <= 5; minRating += 0.1) {
+                    cacheKeysToInvalidate.push(`${restaurant.cuisine}_minRating_${minRating}_limit_${limit}`);
+                }
+            }
+
+            try {
+                // Invalidate cache keys
+                const deletePromises = cacheKeysToInvalidate.map(key => memcachedActions.deleteRestaurants(key).catch(err => {
+                    if (err.cmdTokens && err.cmdTokens[0] === 'NOT_FOUND') {
+                        // Cache key not found, ignoring.
+                    } else {
+                        throw err;
+                    }
+                }));
+                await Promise.all(deletePromises);
+                // Cache invalidated for the generated keys
+            } catch (cacheError) {
+                console.error('Error invalidating memcached:', cacheError);
+            }
+
+            try {
+                // Add the new restaurant to the cache
+                await memcachedActions.addRestaurants(restaurant.name, restaurant);
+                // Added to cache
+            } catch (cacheError) {
+                console.error('Error adding to memcached:', cacheError);
+            }
+        }
 
         res.status(200).send({ success: true });
     } catch (err) {
