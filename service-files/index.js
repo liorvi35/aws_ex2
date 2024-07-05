@@ -440,12 +440,11 @@ app.post('/restaurants/rating', async (req, res) => {
  * @param {Object} req - The request object
  * @param {Object} res - The response object
  */
-
 app.get('/restaurants/cuisine/:cuisine', async (req, res) => {
     const cuisine = req.params.cuisine;
     let limit = parseInt(req.query.limit) || 10;
-    limit = Math.min(limit, 100);
-    const minRating = parseFloat(req.query.minRating) || 0;
+    limit = Math.min(limit, 100); // Ensure the limit does not exceed 100
+    const minRating = parseFloat(req.query.minRating) || 0; // Minimum rating filter
 
     // Check for missing required fields
     if (!cuisine) {
@@ -454,11 +453,33 @@ app.get('/restaurants/cuisine/:cuisine', async (req, res) => {
         return;
     }
 
-    // Validate the minRating value
+    // Validate the minRating parameter
     if (minRating < 0 || minRating > 5) {
         console.error('GET /restaurants/cuisine/:cuisine', 'Invalid rating');
         res.status(400).send({ success: false, message: 'Invalid rating' });
         return;
+    }
+
+    const cacheKey = `${cuisine}_minRating_${minRating}_limit_${limit}`;
+
+    // Check cache if USE_CACHE is enabled
+    if (USE_CACHE) {
+        try {
+            const cachedRestaurants = await memcachedActions.getRestaurants(cacheKey);
+            if (cachedRestaurants) {
+                // Cache hit: return cached data
+                //console.log('Cache hit for:', cacheKey);
+                cachedRestaurants.forEach(restaurant => {
+                    restaurant.rating = parseFloat(restaurant.rating) || 0;
+                });
+                res.status(200).json(cachedRestaurants);
+                return;
+            } else {
+                //console.log('Cache miss for:', cacheKey);
+            }
+        } catch (cacheError) {
+            console.error('Error accessing memcached:', cacheError);
+        }
     }
 
     const params = {
@@ -469,17 +490,17 @@ app.get('/restaurants/cuisine/:cuisine', async (req, res) => {
             ':cuisine': cuisine,
         },
         Limit: limit,
-        ScanIndexForward: false // to get top-rated restaurants
+        ScanIndexForward: false // Get top-rated restaurants
     };
 
     try {
-        // Attempt to query the DynamoDB table
+        // Query DynamoDB for restaurants by cuisine
         const data = await dynamodb.query(params).promise();
 
-        // Filter results based on minRating if not using FilterExpression in DynamoDB query
+        // Filter results based on minRating
         const filteredRestaurants = data.Items.filter(item => item.Rating >= minRating);
 
-        // Map the filtered data to a structured response
+        // Map data to the desired format
         const restaurants = filteredRestaurants.map(item => ({
             cuisine: item.Cuisine,
             name: item.SimpleKey,
@@ -487,7 +508,16 @@ app.get('/restaurants/cuisine/:cuisine', async (req, res) => {
             region: item.GeoRegion
         }));
 
-        // Send the list of restaurants as the response
+        // Add the results to cache if USE_CACHE is enabled
+        if (USE_CACHE) {
+            try {
+                await memcachedActions.addRestaurants(cacheKey, restaurants);
+                //console.log('Added to cache:', cacheKey);
+            } catch (cacheError) {
+                console.error('Error adding to memcached:', cacheError);
+            }
+        }
+
         res.status(200).json(restaurants);
     } catch (error) {
         console.error('GET /restaurants/cuisine/:cuisine', error);
