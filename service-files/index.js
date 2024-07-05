@@ -99,12 +99,59 @@ app.post('/restaurants', async (req, res) => {
     }
 });
 
+
+/**
+ * Retrieves details of a restaurant by its name.
+ * 
+ * GET /restaurants/:restaurantName
+ * 
+ * This endpoint expects a URL parameter with the name of the restaurant.
+ * 
+ * If the restaurant is not found, a 404 status code is returned.
+ * If the operation is successful, a 200 status code is returned along with the restaurant details.
+ * In case of an internal server error, a 500 status code is returned.
+ * 
+ * @param {Object} req - The request object
+ * @param {Object} res - The response object
+ */
+
 app.get('/restaurants/:restaurantName', async (req, res) => {
     const restaurantName = req.params.restaurantName;
 
-    // Students TODO: Implement the logic to get a restaurant by name
-    res.status(404).send("need to implement");
+    // Parameters for DynamoDB get operation
+    const params = {
+        TableName: TABLE_NAME,
+        Key: {
+            SimpleKey: restaurantName
+        }
+    };
+
+    try {
+        // Attempt to retrieve the restaurant data from DynamoDB
+        const data = await dynamodb.get(params).promise();
+
+        // Check if the restaurant exists
+        if (!data.Item) {
+            res.status(404).send({ message: 'Restaurant not found' });
+            return;
+        }
+
+        // Parse and structure the restaurant data
+        const restaurant = {
+            name: data.Item.SimpleKey,
+            cuisine: data.Item.Cuisine,
+            rating: data.Item.Rating || 0,
+            region: data.Item.GeoRegion
+        };
+        
+        // Send the restaurant data as the response
+        res.status(200).send(restaurant);
+    } catch (err) {
+        console.error('GET /restaurants/:restaurantName', err);
+        res.status(500).send('Internal Server Error');
+    }
 });
+
 
 app.delete('/restaurants/:restaurantName', async (req, res) => {
     const restaurantName = req.params.restaurantName;
