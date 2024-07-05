@@ -541,11 +541,10 @@ app.get('/restaurants/cuisine/:cuisine', async (req, res) => {
  * @param {Object} req - The request object
  * @param {Object} res - The response object
  */
-
 app.get('/restaurants/region/:region', async (req, res) => {
-    const region = req.params.region;
-    let limit = parseInt(req.query.limit) || 10;
-    limit = Math.min(limit, 100);
+    const region = req.params.region; // Extract region from URL parameters
+    let limit = parseInt(req.query.limit) || 10; // Extract limit from query parameters or default to 10
+    limit = Math.min(limit, 100); // Ensure the limit does not exceed 100
 
     // Check for missing required fields
     if (!region) {
@@ -554,6 +553,29 @@ app.get('/restaurants/region/:region', async (req, res) => {
         return;
     }
 
+    const cacheKey = `${region}_limit_${limit}`; // Create a cache key
+
+    // Check cache if USE_CACHE is enabled
+    if (USE_CACHE) {
+        try {
+            const cachedRestaurants = await memcachedActions.getRestaurants(cacheKey);
+            if (cachedRestaurants) {
+                // Cache hit: return cached data
+                cachedRestaurants.forEach(restaurant => {
+                    restaurant.rating = parseFloat(restaurant.rating) || 0;
+                });
+                res.status(200).send(cachedRestaurants);
+                return;
+            } else {
+                // Cache miss
+                //console.log('Cache miss for:', cacheKey);
+            }
+        } catch (cacheError) {
+            console.error('Error accessing memcached:', cacheError);
+        }
+    }
+
+    // Query DynamoDB for restaurants by region
     const params = {
         TableName: TABLE_NAME,
         IndexName: 'GeoRegionIndex',
@@ -562,26 +584,36 @@ app.get('/restaurants/region/:region', async (req, res) => {
             ':geoRegion': region
         },
         Limit: limit,
-        ScanIndexForward: false // to get top-rated restaurants
+        ScanIndexForward: false // Get top-rated restaurants
     };
 
     try {
-        // Attempt to query the DynamoDB table
-        const data = await dynamodb.query(params).promise();
+        const data = await dynamodb.query(params).promise(); // Execute DynamoDB query
 
-        // Map the retrieved data to a structured response
-        const restaurants = data.Items.map(item => ({
-            cuisine: item.Cuisine,
-            name: item.SimpleKey,
-            rating: item.Rating,
-            region: item.GeoRegion
-        }));
+        // Map data to the desired format
+        const restaurants = data.Items.map(item => {
+            return {
+                cuisine: item.Cuisine,
+                name: item.SimpleKey,
+                rating: item.Rating,
+                region: item.GeoRegion
+            };
+        });
 
-        // Send the list of restaurants as the response
-        res.status(200).json(restaurants);
+        // Add the results to cache if USE_CACHE is enabled
+        if (USE_CACHE) {
+            try {
+                await memcachedActions.addRestaurants(cacheKey, restaurants);
+                //console.log('Added to cache:', cacheKey);
+            } catch (cacheError) {
+                console.error('Error adding to memcached:', cacheError);
+            }
+        }
+
+        res.status(200).json(restaurants); // Return the restaurants data
     } catch (error) {
         console.error('GET /restaurants/region/:region', error);
-        res.status(500).send("Internal Server Error");
+        res.status(500).send("Internal Server Error"); // Handle internal server error
     }
 });
 
