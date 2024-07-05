@@ -468,14 +468,13 @@ app.get('/restaurants/cuisine/:cuisine', async (req, res) => {
             const cachedRestaurants = await memcachedActions.getRestaurants(cacheKey);
             if (cachedRestaurants) {
                 // Cache hit: return cached data
-                //console.log('Cache hit for:', cacheKey);
                 cachedRestaurants.forEach(restaurant => {
                     restaurant.rating = parseFloat(restaurant.rating) || 0;
                 });
                 res.status(200).json(cachedRestaurants);
                 return;
             } else {
-                //console.log('Cache miss for:', cacheKey);
+                // Cache miss 
             }
         } catch (cacheError) {
             console.error('Error accessing memcached:', cacheError);
@@ -512,7 +511,7 @@ app.get('/restaurants/cuisine/:cuisine', async (req, res) => {
         if (USE_CACHE) {
             try {
                 await memcachedActions.addRestaurants(cacheKey, restaurants);
-                //console.log('Added to cache:', cacheKey);
+                // Added to cache
             } catch (cacheError) {
                 console.error('Error adding to memcached:', cacheError);
             }
@@ -568,7 +567,6 @@ app.get('/restaurants/region/:region', async (req, res) => {
                 return;
             } else {
                 // Cache miss
-                //console.log('Cache miss for:', cacheKey);
             }
         } catch (cacheError) {
             console.error('Error accessing memcached:', cacheError);
@@ -604,7 +602,7 @@ app.get('/restaurants/region/:region', async (req, res) => {
         if (USE_CACHE) {
             try {
                 await memcachedActions.addRestaurants(cacheKey, restaurants);
-                //console.log('Added to cache:', cacheKey);
+                // added to cache
             } catch (cacheError) {
                 console.error('Error adding to memcached:', cacheError);
             }
@@ -661,7 +659,6 @@ app.get('/restaurants/region/:region/cuisine/:cuisine', async (req, res) => {
                 return;
             } else {
                 // Cache miss
-                //console.log('Cache miss for:', cacheKey);
             }
         } catch (cacheError) {
             console.error('Error accessing memcached:', cacheError);
@@ -698,7 +695,7 @@ app.get('/restaurants/region/:region/cuisine/:cuisine', async (req, res) => {
         if (USE_CACHE) {
             try {
                 await memcachedActions.addRestaurants(cacheKey, restaurants);
-                //console.log('Added to cache:', cacheKey);
+                // adding to cache
             } catch (cacheError) {
                 console.error('Error adding to memcached:', cacheError);
             }
