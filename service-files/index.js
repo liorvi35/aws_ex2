@@ -410,12 +410,66 @@ app.get('/restaurants/region/:region', async (req, res) => {
     }
 });
 
+
+/**
+ * Retrieves top-rated restaurants by region and cuisine.
+ * 
+ * GET /restaurants/region/:region/cuisine/:cuisine
+ * 
+ * This endpoint expects URL parameters for the geographical region and the type of cuisine.
+ * It supports an optional query parameter 'limit' to limit the number of results (default 10, max 100).
+ * 
+ * If the region or cuisine is not provided, a 400 status code is returned.
+ * If the operation is successful, a 200 status code is returned with a list of restaurants.
+ * In case of an internal server error, a 500 status code is returned.
+ * 
+ * @param {Object} req - The request object
+ * @param {Object} res - The response object
+ */
+
 app.get('/restaurants/region/:region/cuisine/:cuisine', async (req, res) => {
     const region = req.params.region;
     const cuisine = req.params.cuisine;
+    let limit = parseInt(req.query.limit) || 10;
+    limit = Math.min(limit, 100);
 
-    // Students TODO: Implement the logic to get top rated restaurants by region and cuisine
-    res.status(404).send("need to implement");
+    // Check for missing required fields
+    if (!region || !cuisine) {
+        console.error('GET /restaurants/region/:region/cuisine/:cuisine', 'Missing required fields');
+        res.status(400).send({ success: false, message: 'Missing required fields' });
+        return;
+    }
+
+    const params = {
+        TableName: TABLE_NAME,
+        IndexName: 'GeoRegionCuisineIndex',
+        KeyConditionExpression: 'GeoRegion = :geoRegion and Cuisine = :cuisine',
+        ExpressionAttributeValues: {
+            ':geoRegion': region,
+            ':cuisine': cuisine
+        },
+        Limit: limit,
+        ScanIndexForward: false // to get top-rated restaurants
+    };
+
+    try {
+        // Attempt to query the DynamoDB table
+        const data = await dynamodb.query(params).promise();
+
+        // Map the retrieved data to a structured response
+        const restaurants = data.Items.map(item => ({
+            cuisine: item.Cuisine,
+            name: item.SimpleKey,
+            rating: item.Rating,
+            region: item.GeoRegion
+        }));
+
+        // Send the list of restaurants as the response
+        res.status(200).json(restaurants);
+    } catch (error) {
+        console.error('GET /restaurants/region/:region/cuisine/:cuisine', error);
+        res.status(500).send('Internal Server Error');
+    }
 });
 
 app.listen(80, () => {
