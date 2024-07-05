@@ -237,11 +237,9 @@ app.get('/restaurants/:restaurantName', async (req, res) => {
  * @param {Object} req - The request object
  * @param {Object} res - The response object
  */
-
 app.delete('/restaurants/:restaurantName', async (req, res) => {
     const restaurantName = req.params.restaurantName;
 
-    // Parameters for DynamoDB get and delete operations
     const params = {
         TableName: TABLE_NAME,
         Key: {
@@ -250,20 +248,59 @@ app.delete('/restaurants/:restaurantName', async (req, res) => {
     };
 
     try {
-        // Attempt to retrieve the restaurant data from DynamoDB
+        // Attempt to retrieve the restaurant from the database
         const data = await dynamodb.get(params).promise();
 
-        // Check if the restaurant exists
         if (!data.Item) {
             res.status(404).send({ message: 'Restaurant not found' });
             return;
         }
 
-        // Delete the restaurant from DynamoDB
+        if (USE_CACHE) {
+            try {
+                // Invalidate the cache for the restaurant
+                await memcachedActions.deleteRestaurants(restaurantName);
+                //console.log('Cache invalidated for:', restaurantName);
+            } catch (cacheError) {
+                console.error('Error invalidating memcached:', cacheError);
+            }
+
+            try {
+                const cacheKeysToInvalidate = [];
+
+                // Generate cache keys to invalidate
+                for (let limit = 10; limit <= 100; limit += 1) {
+                    cacheKeysToInvalidate.push(`${data.Item.region}_limit_${limit}`);
+                    cacheKeysToInvalidate.push(`${data.Item.region}_${data.Item.cuisine}_limit_${limit}`);
+
+                    for (let minRating = 0; minRating <= 5; minRating += 0.1) {
+                        cacheKeysToInvalidate.push(`${data.Item.cuisine}_minRating_${minRating}_limit_${limit}`);
+                    }
+                }
+
+                try {
+                    // Invalidate the generated cache keys
+                    const deletePromises = cacheKeysToInvalidate.map(key => memcachedActions.deleteRestaurants(key).catch(err => {
+                        if (err.cmdTokens && err.cmdTokens[0] === 'NOT_FOUND') {
+                            // Cache key not found, ignoring.
+                        } else {
+                            throw err;
+                        }
+                    }));
+                    await Promise.all(deletePromises);
+                    // Cache invalidated for the generated keys
+                } catch (cacheError) {
+                    console.error('Error invalidating memcached:', cacheError);
+                }
+
+            } catch (cacheError) {
+                console.error('Error invalidating memcached:', cacheError);
+            }
+        }
+
+        // Delete the restaurant from the database
         await dynamodb.delete(params).promise();
         console.log('Restaurant', restaurantName, 'deleted successfully');
-        
-        // Send a success response
         res.status(200).send({ success: true });
     } catch (err) {
         console.error('DELETE /restaurants/:restaurantName', err);
