@@ -171,6 +171,33 @@ export class RestaurantsCdkStack extends cdk.Stack {
       writeCapacity: 1, // Note for students: you may need to change this num write capacity for scaling testing if you belive that is right
     });
 
+    table.addGlobalSecondaryIndex({
+      indexName: 'CuisineIndex',
+      partitionKey: { name: 'Cuisine', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'Rating', type: dynamodb.AttributeType.NUMBER },
+      projectionType: dynamodb.ProjectionType.ALL,
+      readCapacity: 1,
+      writeCapacity: 1,
+    });
+    
+    table.addGlobalSecondaryIndex({
+      indexName: 'GeoRegionIndex',
+      partitionKey: { name: 'GeoRegion', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'Rating', type: dynamodb.AttributeType.NUMBER },
+      projectionType: dynamodb.ProjectionType.ALL,
+      readCapacity: 1,
+      writeCapacity: 1,
+    });
+    
+    table.addGlobalSecondaryIndex({
+      indexName: 'GeoRegionCuisineIndex',
+      partitionKey: { name: 'GeoRegion', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'Cuisine', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+      readCapacity: 1,
+      writeCapacity: 1,
+    });
+
     // Output the table name
     new cdk.CfnOutput(this, 'TableName', {
       value: table.tableName,
