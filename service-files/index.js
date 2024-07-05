@@ -308,6 +308,7 @@ app.delete('/restaurants/:restaurantName', async (req, res) => {
     }
 });
 
+
 /**
  * Adds a rating to a restaurant and calculates the average rating.
  * 
@@ -325,19 +326,17 @@ app.delete('/restaurants/:restaurantName', async (req, res) => {
  * @param {Object} req - The request object
  * @param {Object} res - The response object
  */
-
 app.post('/restaurants/rating', async (req, res) => {
     const restaurantName = req.body.name;
     const newRating = req.body.rating;
 
     // Check for missing required fields
-    if (!restaurantName || newRating === undefined) {
+    if (!restaurantName || !newRating) {
         console.error('POST /restaurants/rating', 'Missing required fields');
         res.status(400).send({ success: false, message: 'Missing required fields' });
         return;
     }
 
-    // Parameters for DynamoDB get operation
     const params = {
         TableName: TABLE_NAME,
         Key: {
@@ -346,10 +345,9 @@ app.post('/restaurants/rating', async (req, res) => {
     };
 
     try {
-        // Attempt to retrieve the restaurant data from DynamoDB
+        // Retrieve the restaurant data from the database
         const data = await dynamodb.get(params).promise();
 
-        // Check if the restaurant exists
         if (!data.Item) {
             res.status(404).send("Restaurant not found");
             return;
@@ -360,7 +358,7 @@ app.post('/restaurants/rating', async (req, res) => {
         const ratingCount = data.Item.RatingCount || 0;
         const newAverageRating = ((oldRating * ratingCount) + newRating) / (ratingCount + 1);
 
-        // Update parameters for DynamoDB update operation
+        // Update the restaurant's rating in the database
         const updateParams = {
             TableName: TABLE_NAME,
             Key: {
@@ -373,10 +371,50 @@ app.post('/restaurants/rating', async (req, res) => {
             }
         };
 
-        // Update the restaurant's rating in DynamoDB
         await dynamodb.update(updateParams).promise();
 
-        // Send a success response
+        if (USE_CACHE) {
+            try {
+                // Update the cache with the new rating
+                await memcachedActions.addRestaurants(restaurantName, {
+                    name: restaurantName,
+                    cuisine: data.Item.Cuisine,
+                    rating: newAverageRating.toString(),
+                    region: data.Item.GeoRegion
+                });
+
+                const cacheKeysToInvalidate = [];
+
+                // Generate cache keys to invalidate
+                for (let limit = 10; limit <= 100; limit += 1) {
+                    cacheKeysToInvalidate.push(`${data.Item.region}_limit_${limit}`);
+                    cacheKeysToInvalidate.push(`${data.Item.region}_${data.Item.cuisine}_limit_${limit}`);
+
+                    for (let minRating = 0; minRating <= 5; minRating += 0.1) {
+                        cacheKeysToInvalidate.push(`${data.Item.cuisine}_minRating_${minRating}_limit_${limit}`);
+                    }
+                }
+
+                try {
+                    // Invalidate the generated cache keys
+                    const deletePromises = cacheKeysToInvalidate.map(key => memcachedActions.deleteRestaurants(key).catch(err => {
+                        if (err.cmdTokens && err.cmdTokens[0] === 'NOT_FOUND') {
+                            // Cache key not found, ignoring.
+                        } else {
+                            throw err;
+                        }
+                    }));
+                    await Promise.all(deletePromises);
+                    // Cache invalidated for the generated keys
+                } catch (cacheError) {
+                    console.error('Error invalidating memcached:', cacheError);
+                }
+
+            } catch (cacheError) {
+                console.error('Error invalidating memcached:', cacheError);
+            }
+        }
+
         res.status(200).send({ success: true });
     } catch (error) {
         console.error('POST /restaurants/rating', error);
