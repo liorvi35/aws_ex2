@@ -163,11 +163,23 @@ app.post('/restaurants', async (req, res) => {
  * @param {Object} req - The request object
  * @param {Object} res - The response object
  */
-
 app.get('/restaurants/:restaurantName', async (req, res) => {
     const restaurantName = req.params.restaurantName;
 
-    // Parameters for DynamoDB get operation
+    if (USE_CACHE) {
+        try {
+            // Check the cache for the restaurant
+            const cachedRestaurant = await memcachedActions.getRestaurants(restaurantName);
+            if (cachedRestaurant) {
+                cachedRestaurant.rating = parseFloat(cachedRestaurant.rating) || 0;
+                res.status(200).send(cachedRestaurant);
+                return;
+            }
+        } catch (cacheError) {
+            console.error('Error accessing memcached:', cacheError);
+        }
+    }
+
     const params = {
         TableName: TABLE_NAME,
         Key: {
@@ -176,24 +188,33 @@ app.get('/restaurants/:restaurantName', async (req, res) => {
     };
 
     try {
-        // Attempt to retrieve the restaurant data from DynamoDB
+        // Attempt to retrieve the restaurant from the database
         const data = await dynamodb.get(params).promise();
 
-        // Check if the restaurant exists
         if (!data.Item) {
             res.status(404).send({ message: 'Restaurant not found' });
             return;
         }
 
-        // Parse and structure the restaurant data
+        // Parse the restaurant data
         const restaurant = {
             name: data.Item.SimpleKey,
             cuisine: data.Item.Cuisine,
             rating: data.Item.Rating || 0,
             region: data.Item.GeoRegion
         };
-        
-        // Send the restaurant data as the response
+
+        if (USE_CACHE) {
+            try {
+                restaurant.rating = restaurant.rating.toString();
+                // Add the restaurant to the cache
+                await memcachedActions.addRestaurants(restaurantName, restaurant);
+            } catch (cacheError) {
+                console.error('Error adding to memcached:', cacheError);
+            }
+        }
+
+        // Send the restaurant details as the response
         res.status(200).send(restaurant);
     } catch (err) {
         console.error('GET /restaurants/:restaurantName', err);
