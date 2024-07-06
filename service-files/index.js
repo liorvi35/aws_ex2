@@ -7,7 +7,7 @@ app.use(express.json());
 const MEMCACHED_CONFIGURATION_ENDPOINT = process.env.MEMCACHED_CONFIGURATION_ENDPOINT;
 const TABLE_NAME = process.env.TABLE_NAME;
 const AWS_REGION = process.env.AWS_REGION;
-const USE_CACHE = process.env.USE_CACHE === 'true';
+const USE_CACHE = true;
 
 const memcachedActions = new RestaurantsMemcachedActions(MEMCACHED_CONFIGURATION_ENDPOINT);
 
